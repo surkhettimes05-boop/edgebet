@@ -1,11 +1,12 @@
 {
-  "version": 2,
+  "framework": "express",
   "installCommand": "npm install",
-  "buildCommand": "DATABASE_URL=postgresql://user:pass@localhost:5432/edgebet npx prisma generate --schema prisma/schema.prisma",
-  "routes": [
-    {
-      "src": "/(.*)",
-      "dest": "/api/index.js"
+  "buildCommand": "npx prisma generate --schema prisma/schema.prisma",
+  "experimentalServices": {
+    "web": {
+      "entrypoint": "api/index.js",
+      "framework": "express",
+      "routePrefix": "/"
     }
-  ]
+  }
 }
