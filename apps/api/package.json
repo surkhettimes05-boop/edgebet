@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
+    "postinstall": "prisma generate --schema prisma/schema.prisma",
     "start:prod": "node scripts/migrate-prod.js && node src/server.js",
     "test": "vitest run --globals",
     "prisma:generate": "prisma generate --schema prisma/schema.prisma",
