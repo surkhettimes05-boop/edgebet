@@ -378,13 +378,13 @@ const DEMO_ODDS_MOVEMENT = [
 
 export default function ValueBetsPage() {
   const [rawPredictions, setRawPredictions] = useState<ApiPrediction[]>([]);
-  const [allSignals, setAllSignals] = useState<ValueBetSignal[]>(DEMO_SIGNALS);
+  const [allSignals, setAllSignals] = useState<ValueBetSignal[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
-  const [isDemo, setIsDemo] = useState(true);
+  const [isDemo, setIsDemo] = useState(false);
 
   const [filters, setFilters] = useState<FilterState>(FILTER_DEFAULTS);
-  const [selectedId, setSelectedId] = useState<string | null>(DEMO_SIGNALS[0].id);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   // ── Fetch predictions ──
   const fetchPredictions = useCallback(async () => {
@@ -404,16 +404,15 @@ export default function ValueBetsPage() {
         setSelectedId(signals[0]?.id ?? null);
         setIsDemo(false);
       } else {
-        // No DB predictions — keep demo data
-        setAllSignals(DEMO_SIGNALS);
-        setSelectedId(DEMO_SIGNALS[0].id);
-        setIsDemo(true);
+        setAllSignals([]);
+        setSelectedId(null);
+        setIsDemo(false);
       }
-    } catch {
-      // API unavailable — fall back to demo data silently
-      setAllSignals(DEMO_SIGNALS);
-      setSelectedId(DEMO_SIGNALS[0].id);
-      setIsDemo(true);
+    } catch (error) {
+      setAllSignals([]);
+      setSelectedId(null);
+      setFetchError(error instanceof Error ? error.message : "Failed to load real prediction data.");
+      setIsDemo(false);
     } finally {
       setIsLoading(false);
     }
@@ -458,7 +457,7 @@ export default function ValueBetsPage() {
 
   // ── Odds movement chart data ──
   const oddsMovementData = useMemo(() => {
-    if (!selectedSignal) return DEMO_ODDS_MOVEMENT;
+    if (!selectedSignal) return [];
     if (isDemo) return DEMO_ODDS_MOVEMENT;
     return buildOddsMovement(selectedSignal, rawPredictions);
   }, [selectedSignal, isDemo, rawPredictions]);
