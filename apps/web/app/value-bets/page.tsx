@@ -52,6 +52,8 @@ interface ApiPrediction {
     awayTeam: { name: string };
     league: { name: string; sport: string };
     oddsSnapshots?: Array<{
+      market: string;
+      selection: string;
       priceDecimal: string | number;
       bookmaker: { name: string };
       capturedAt: string;
@@ -67,12 +69,13 @@ function toSignal(p: ApiPrediction): ValueBetSignal {
   const fairPrice = Number(p.fairPriceDecimal);
   const edgePct = Number(p.edgePct);
 
-  // Best odds: use the highest decimal odds from snapshots, or derive from fair price + edge
-  const snapshots = p.match?.oddsSnapshots ?? [];
+  const snapshots = (p.match?.oddsSnapshots ?? []).filter((s) => {
+    return s.market === p.market && normalizeSelection(p, p.selection) === s.selection;
+  });
   const bestOdds =
     snapshots.length > 0
       ? Math.max(...snapshots.map((s) => Number(s.priceDecimal)))
-      : fairPrice * (1 + edgePct / 100);
+      : 0;
 
   const impliedProb = bestOdds > 1 ? 1 / bestOdds : 0;
   const ev = modelProb * bestOdds - 1;
@@ -98,7 +101,7 @@ function toSignal(p: ApiPrediction): ValueBetSignal {
       : "Unknown Match",
     league: p.match?.league?.name ?? "",
     market: p.market,
-    selection: p.selection,
+    selection: displaySelection(p),
     bookmaker,
     modelProb,
     impliedProb,
@@ -109,6 +112,49 @@ function toSignal(p: ApiPrediction): ValueBetSignal {
     decision,
     riskFlags
   };
+}
+
+function normalizeSelection(prediction: ApiPrediction, selection: string) {
+  if (!prediction.match) return selection;
+
+  if (prediction.market === "MONEYLINE") {
+    if (selection === "HOME") return prediction.match.homeTeam.name;
+    if (selection === "AWAY") return prediction.match.awayTeam.name;
+  }
+
+  if (prediction.market === "TOTAL") {
+    const total = selection.match(/^(OVER|UNDER)_(\d+(?:\.\d+)?)$/);
+    if (total) return `${titleCase(total[1])} ${formatLine(total[2])}`;
+  }
+
+  if (prediction.market === "SPREAD") {
+    const homeSpread = selection.match(/^HOME_([+-]?\d+(?:\.\d+)?)$/);
+    const awaySpread = selection.match(/^AWAY_([+-]?\d+(?:\.\d+)?)$/);
+    if (homeSpread) return `${prediction.match.homeTeam.name} ${formatBookLine(homeSpread[1])}`;
+    if (awaySpread) return `${prediction.match.awayTeam.name} ${formatBookLine(awaySpread[1])}`;
+  }
+
+  return selection;
+}
+
+function displaySelection(prediction: ApiPrediction) {
+  if (!prediction.match) return prediction.selection;
+  if (prediction.market === "MONEYLINE") return normalizeSelection(prediction, prediction.selection);
+  return prediction.selection.replace("_", " ");
+}
+
+function titleCase(value: string) {
+  return value.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function formatBookLine(value: string) {
+  return formatLine(value).replace(/^\+/, "");
+}
+
+function formatLine(value: string) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return value;
+  return Number.isInteger(numeric) ? String(numeric) : String(numeric);
 }
 
 function buildRiskFlags({

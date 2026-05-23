@@ -57,6 +57,20 @@ const TOOLTIP_STYLE = {
   borderRadius: "4px"
 };
 
+function titleCase(value: string) {
+  return value.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function formatBookLine(value: string) {
+  return formatLine(value).replace(/^\+/, "");
+}
+
+function formatLine(value: string) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return value;
+  return Number.isInteger(numeric) ? String(numeric) : String(numeric);
+}
+
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 /** Single probability row: label + bar + value */
@@ -186,42 +200,6 @@ function DisagreementMeter({
   );
 }
 
-function poissonProbability(lambda: number, goals: number): number {
-  let factorial = 1;
-  for (let i = 2; i <= goals; i += 1) factorial *= i;
-  return (Math.exp(-lambda) * Math.pow(lambda, goals)) / factorial;
-}
-
-function buildPoissonSummary(homeXg: number, awayXg: number) {
-  const maxGoals = 10;
-  let homeWin = 0;
-  let draw = 0;
-  let awayWin = 0;
-  let over25 = 0;
-  let btts = 0;
-
-  for (let homeGoals = 0; homeGoals <= maxGoals; homeGoals += 1) {
-    for (let awayGoals = 0; awayGoals <= maxGoals; awayGoals += 1) {
-      const prob =
-        poissonProbability(homeXg, homeGoals) * poissonProbability(awayXg, awayGoals);
-
-      if (homeGoals > awayGoals) homeWin += prob;
-      if (homeGoals === awayGoals) draw += prob;
-      if (awayGoals > homeGoals) awayWin += prob;
-      if (homeGoals + awayGoals > 2.5) over25 += prob;
-      if (homeGoals > 0 && awayGoals > 0) btts += prob;
-    }
-  }
-
-  return [
-    { label: "Home win", value: homeWin, tone: "text-sky-400" },
-    { label: "Draw", value: draw, tone: "text-slate-300" },
-    { label: "Away win", value: awayWin, tone: "text-violet-400" },
-    { label: "Over 2.5", value: over25, tone: "text-emerald-400" },
-    { label: "BTTS", value: btts, tone: "text-amber-400" }
-  ];
-}
-
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function ProbabilityPanel({
@@ -259,6 +237,26 @@ export default function ProbabilityPanel({
     return map;
   }, [snapshots]);
 
+  const selectionForSnapshot = useMemo(() => {
+    return (market: string, selection: string) => {
+      if (market === "MONEYLINE") {
+        if (selection === "HOME") return homeTeam;
+        if (selection === "AWAY") return awayTeam;
+      }
+      if (market === "TOTAL") {
+        const total = selection.match(/^(OVER|UNDER)_(\d+(?:\.\d+)?)$/);
+        if (total) return `${titleCase(total[1])} ${formatLine(total[2])}`;
+      }
+      if (market === "SPREAD") {
+        const homeSpread = selection.match(/^HOME_([+-]?\d+(?:\.\d+)?)$/);
+        const awaySpread = selection.match(/^AWAY_([+-]?\d+(?:\.\d+)?)$/);
+        if (homeSpread) return `${homeTeam} ${formatBookLine(homeSpread[1])}`;
+        if (awaySpread) return `${awayTeam} ${formatBookLine(awaySpread[1])}`;
+      }
+      return selection;
+    };
+  }, [homeTeam, awayTeam]);
+
   // Moneyline predictions for radar chart
   const moneylinePreds = useMemo(
     () => byMarket.get("MONEYLINE") ?? [],
@@ -268,7 +266,7 @@ export default function ProbabilityPanel({
   // Radar data: model vs implied for moneyline
   const radarData = useMemo(() => {
     return moneylinePreds.map((p) => {
-      const key = `MONEYLINE__${p.selection}`;
+      const key = `MONEYLINE__${selectionForSnapshot("MONEYLINE", p.selection)}`;
       const implied = bestImplied.get(key);
       return {
         selection: p.selection === "HOME" ? homeTeam : p.selection === "AWAY" ? awayTeam : p.selection,
@@ -276,18 +274,18 @@ export default function ProbabilityPanel({
         implied: implied ? parseFloat((implied.impliedProb * 100).toFixed(1)) : null
       };
     });
-  }, [moneylinePreds, bestImplied, homeTeam, awayTeam]);
+  }, [moneylinePreds, bestImplied, homeTeam, awayTeam, selectionForSnapshot]);
 
-  // xG bar chart data
-  const xgData = useMemo(() => {
+  // Expected points chart data
+  const expectedPointsData = useMemo(() => {
     if (homeXg == null && awayXg == null) return [];
     return [
-      { team: homeTeam.split(" ").pop() ?? homeTeam, xg: homeXg ?? 0, side: "home" },
-      { team: awayTeam.split(" ").pop() ?? awayTeam, xg: awayXg ?? 0, side: "away" }
+      { team: homeTeam.split(" ").pop() ?? homeTeam, points: homeXg ?? 0, side: "home" },
+      { team: awayTeam.split(" ").pop() ?? awayTeam, points: awayXg ?? 0, side: "away" }
     ];
   }, [homeXg, awayXg, homeTeam, awayTeam]);
 
-  // Rationale from first Poisson prediction
+  // Rationale from first model prediction
   const rationale = useMemo(() => {
     for (const [, preds] of byMarket) {
       for (const p of preds) {
@@ -297,30 +295,23 @@ export default function ProbabilityPanel({
     return null;
   }, [byMarket]);
 
-  // Parse xG from rationale string if not provided directly
-  const parsedXg = useMemo(() => {
+  // Parse expected points from rationale string if not provided directly
+  const parsedExpectedPoints = useMemo(() => {
     if (homeXg != null && awayXg != null) return { home: homeXg, away: awayXg };
     if (!rationale) return null;
-    const match = rationale.match(/home_xg=([\d.]+).*away_xg=([\d.]+)/);
+    const match = rationale.match(/home_pts=([\d.]+).*away_pts=([\d.]+)/);
     if (!match) return null;
     return { home: parseFloat(match[1]), away: parseFloat(match[2]) };
   }, [rationale, homeXg, awayXg]);
 
-  const effectiveXgData = useMemo(() => {
-    if (xgData.length > 0) return xgData;
-    if (!parsedXg) return [];
+  const effectivePointsData = useMemo(() => {
+    if (expectedPointsData.length > 0) return expectedPointsData;
+    if (!parsedExpectedPoints) return [];
     return [
-      { team: homeTeam.split(" ").pop() ?? homeTeam, xg: parsedXg.home, side: "home" },
-      { team: awayTeam.split(" ").pop() ?? awayTeam, xg: parsedXg.away, side: "away" }
+      { team: homeTeam.split(" ").pop() ?? homeTeam, points: parsedExpectedPoints.home, side: "home" },
+      { team: awayTeam.split(" ").pop() ?? awayTeam, points: parsedExpectedPoints.away, side: "away" }
     ];
-  }, [xgData, parsedXg, homeTeam, awayTeam]);
-
-  const poissonSummary = useMemo(() => {
-    const home = effectiveXgData.find((d) => d.side === "home")?.xg;
-    const away = effectiveXgData.find((d) => d.side === "away")?.xg;
-    if (home == null || away == null) return [];
-    return buildPoissonSummary(home, away);
-  }, [effectiveXgData]);
+  }, [expectedPointsData, parsedExpectedPoints, homeTeam, awayTeam]);
 
   const hasData = predictions.length > 0;
 
@@ -329,7 +320,7 @@ export default function ProbabilityPanel({
       <div className="flex flex-col items-center justify-center py-12 text-center font-mono">
         <p className="text-slate-500 text-sm">No model predictions available.</p>
         <p className="text-slate-600 text-xs mt-1">
-          Run the Poisson prediction worker to generate probability estimates.
+          Run the basketball prediction worker to generate probability estimates.
         </p>
       </div>
     );
@@ -345,7 +336,7 @@ export default function ProbabilityPanel({
           </h3>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {moneylinePreds.map((p) => {
-              const key = `MONEYLINE__${p.selection}`;
+              const key = `MONEYLINE__${selectionForSnapshot("MONEYLINE", p.selection)}`;
               const implied = bestImplied.get(key);
               const label =
                 p.selection === "HOME"
@@ -420,27 +411,27 @@ export default function ProbabilityPanel({
         </div>
       )}
 
-      {/* ── xG bar chart ── */}
-      {effectiveXgData.length > 0 && (
+      {/* ── Expected points bar chart ── */}
+      {effectivePointsData.length > 0 && (
         <div className="space-y-2">
           <h3 className="text-[10px] font-mono font-bold uppercase tracking-widest text-slate-500">
-            Expected Goals (xG)
+            Expected Points
           </h3>
           <div className="h-28">
             <ResponsiveContainer width="100%" height="100%" minWidth={0} initialDimension={{ width: 0, height: 112 }}>
               <BarChart
-                data={effectiveXgData}
+                data={effectivePointsData}
                 layout="vertical"
                 margin={{ top: 0, right: 40, left: 0, bottom: 0 }}
               >
                 <CartesianGrid strokeDasharray="3 3" stroke="#1d2836" horizontal={false} />
                 <XAxis
                   type="number"
-                  domain={[0, 3]}
+                  domain={[80, 140]}
                   stroke="#475569"
                   fontSize={10}
                   fontFamily="JetBrains Mono"
-                  tickFormatter={(v) => v.toFixed(1)}
+                  tickFormatter={(v) => v.toFixed(0)}
                 />
                 <YAxis
                   type="category"
@@ -452,13 +443,13 @@ export default function ProbabilityPanel({
                 />
                 <Tooltip
                   contentStyle={TOOLTIP_STYLE}
-                  formatter={(v: number) => [v.toFixed(3), "xG"]}
+                  formatter={(v: number) => [v.toFixed(1), "Projected points"]}
                 />
-                <ReferenceLine x={1.3} stroke="#475569" strokeDasharray="3 3" opacity={0.4}
+                <ReferenceLine x={112} stroke="#475569" strokeDasharray="3 3" opacity={0.4}
                   label={{ value: "avg", position: "top", fill: "#475569", fontSize: 8, fontFamily: "JetBrains Mono" }}
                 />
-                <Bar dataKey="xg" maxBarSize={20} radius={[0, 3, 3, 0]}>
-                  {effectiveXgData.map((entry, i) => (
+                <Bar dataKey="points" maxBarSize={20} radius={[0, 3, 3, 0]}>
+                  {effectivePointsData.map((entry, i) => (
                     <Cell
                       key={i}
                       fill={entry.side === "home" ? "#0ea5e9" : "#a78bfa"}
@@ -482,30 +473,6 @@ export default function ProbabilityPanel({
         </div>
       )}
 
-      {/* Poisson probability summary */}
-      {poissonSummary.length > 0 && (
-        <div className="space-y-2">
-          <h3 className="text-[10px] font-mono font-bold uppercase tracking-widest text-slate-500">
-            Poisson Probabilities
-          </h3>
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-            {poissonSummary.map((item) => (
-              <div key={item.label} className="rounded border border-[#222e3f] bg-[#0c0f16] px-3 py-2">
-                <span className="block text-[9px] font-mono font-bold uppercase tracking-widest text-slate-500">
-                  {item.label}
-                </span>
-                <span className={`mt-1 block text-sm font-mono font-semibold ${item.tone}`}>
-                  {(item.value * 100).toFixed(1)}%
-                </span>
-              </div>
-            ))}
-          </div>
-          <p className="text-[9px] font-mono text-slate-600">
-            Derived from independent Poisson goal distributions using the displayed xG inputs.
-          </p>
-        </div>
-      )}
-
       {/* ── Over/Under probabilities ── */}
       {byMarket.has("TOTAL") && (
         <div className="space-y-2">
@@ -514,7 +481,7 @@ export default function ProbabilityPanel({
           </h3>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
             {(byMarket.get("TOTAL") ?? []).map((p) => {
-              const key = `TOTAL__${p.selection}`;
+              const key = `TOTAL__${selectionForSnapshot("TOTAL", p.selection)}`;
               const implied = bestImplied.get(key);
               return (
                 <ProbRow
@@ -532,20 +499,20 @@ export default function ProbabilityPanel({
         </div>
       )}
 
-      {/* ── BTTS ── */}
-      {byMarket.has("BTTS") && (
+      {/* ── Spread probabilities ── */}
+      {byMarket.has("SPREAD") && (
         <div className="space-y-2">
           <h3 className="text-[10px] font-mono font-bold uppercase tracking-widest text-slate-500">
-            Both Teams to Score
+            Spread
           </h3>
           <div className="grid grid-cols-2 gap-2">
-            {(byMarket.get("BTTS") ?? []).map((p) => {
-              const key = `BTTS__${p.selection}`;
+            {(byMarket.get("SPREAD") ?? []).map((p) => {
+              const key = `SPREAD__${selectionForSnapshot("SPREAD", p.selection)}`;
               const implied = bestImplied.get(key);
               return (
                 <ProbRow
                   key={p.id}
-                  label={`BTTS ${p.selection}`}
+                  label={p.selection}
                   modelProb={p.fairProbability}
                   impliedProb={implied?.impliedProb ?? null}
                   fairPrice={p.fairPriceDecimal}
@@ -567,12 +534,12 @@ export default function ProbabilityPanel({
           <div className="space-y-2">
             {predictions
               .filter((p) => {
-                const key = `${p.market}__${p.selection}`;
+                const key = `${p.market}__${selectionForSnapshot(p.market, p.selection)}`;
                 return bestImplied.has(key);
               })
               .slice(0, 6)
               .map((p) => {
-                const key = `${p.market}__${p.selection}`;
+                const key = `${p.market}__${selectionForSnapshot(p.market, p.selection)}`;
                 const implied = bestImplied.get(key)!;
                 const label =
                   p.selection === "HOME"

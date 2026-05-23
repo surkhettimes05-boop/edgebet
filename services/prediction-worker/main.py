@@ -8,12 +8,12 @@ from poisson import MODEL_VERSION, generate_predictions
 
 
 def main():
-    print("EdgeBet Poisson prediction worker initialized")
+    print("EdgeBet basketball prediction worker initialized")
 
     try:
         engine = create_db_engine()
     except (RuntimeError, ValueError) as error:
-        print(f"[poisson] skipped: {error}")
+        print(f"[basketball] skipped: {error}")
         return {
             "connected": False,
             "matches": 0,
@@ -23,19 +23,19 @@ def main():
 
     with engine.connect() as connection:
         connection.exec_driver_sql("SELECT 1")
-    print("[poisson] database connected")
+    print("[basketball] database connected")
 
     matches = fetch_upcoming_matches(engine)
     history = fetch_recent_results(engine)
-    print(f"[poisson] upcoming matches loaded: {len(matches)}")
+    print(f"[basketball] upcoming matches loaded: {len(matches)}")
 
     predictions = []
     for match in matches.to_dict("records"):
         predictions.extend(generate_predictions(match, history, model_version=MODEL_VERSION))
 
     saved = save_predictions(engine, predictions)
-    print(f"[poisson] generated probabilities: {len(predictions)}")
-    print(f"[poisson] saved predictions: {saved}")
+    print(f"[basketball] generated probabilities: {len(predictions)}")
+    print(f"[basketball] saved predictions: {saved}")
 
     return {
         "connected": True,

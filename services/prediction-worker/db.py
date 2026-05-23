@@ -1,5 +1,6 @@
 import os
 import uuid
+import json
 
 import pandas as pd
 from sqlalchemy import create_engine, text
@@ -34,7 +35,18 @@ def fetch_upcoming_matches(engine, limit=50):
           m.starts_at,
           ht.name AS home_team,
           at.name AS away_team,
-          l.name AS league_name
+          l.name AS league_name,
+          COALESCE(
+            (
+              SELECT json_agg(DISTINCT jsonb_build_object(
+                'market', os.market::text,
+                'selection', os.selection
+              ))
+              FROM odds_snapshots os
+              WHERE os.match_id = m.id
+            ),
+            '[]'::json
+          ) AS odds_lines
         FROM matches m
         JOIN teams ht ON ht.id = m.home_team_id
         JOIN teams at ON at.id = m.away_team_id
@@ -46,7 +58,10 @@ def fetch_upcoming_matches(engine, limit=50):
         """
     )
 
-    return pd.read_sql_query(query, engine, params={"limit": limit})
+    matches = pd.read_sql_query(query, engine, params={"limit": limit})
+    if "odds_lines" in matches.columns:
+        matches["odds_lines"] = matches["odds_lines"].apply(_parse_json_value)
+    return matches
 
 
 def fetch_recent_results(engine, limit=500):
@@ -116,3 +131,11 @@ def save_predictions(engine, predictions):
 
 def _prediction_id():
     return f"pred_{uuid.uuid4().hex}"
+
+
+def _parse_json_value(value):
+    if isinstance(value, str):
+        return json.loads(value)
+    if value is None:
+        return []
+    return value

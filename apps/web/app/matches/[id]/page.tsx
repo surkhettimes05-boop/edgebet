@@ -130,7 +130,7 @@ function buildDemoMatch(id: string): MatchDetail {
         fairProbability: "0.620",
         fairPriceDecimal: "1.613",
         edgePct: "0.0",
-        rationale: "Deterministic Poisson model: home_xg=1.520, away_xg=1.180",
+        rationale: "Deterministic basketball model: home_pts=116.5, away_pts=111.2, margin=5.3, total=227.7",
         createdAt: now.toISOString()
       },
       {
@@ -140,7 +140,7 @@ function buildDemoMatch(id: string): MatchDetail {
         fairProbability: "0.380",
         fairPriceDecimal: "2.632",
         edgePct: "0.042",
-        rationale: "Deterministic Poisson model: home_xg=1.520, away_xg=1.180",
+        rationale: "Deterministic basketball model: home_pts=116.5, away_pts=111.2, margin=5.3, total=227.7",
         createdAt: now.toISOString()
       },
       {
@@ -178,26 +178,62 @@ interface RiskFlag {
 function selectionLabel(selection: string, match: MatchDetail) {
   if (selection === "HOME") return match.homeTeam.name;
   if (selection === "AWAY") return match.awayTeam.name;
+  return selection.replace("_", " ");
+}
+
+function snapshotSelection(selection: string, market: string, match: MatchDetail) {
+  if (market === "MONEYLINE") {
+    if (selection === "HOME") return match.homeTeam.name;
+    if (selection === "AWAY") return match.awayTeam.name;
+  }
+  if (market === "TOTAL") {
+    const total = selection.match(/^(OVER|UNDER)_(\d+(?:\.\d+)?)$/);
+    if (total) return `${titleCase(total[1])} ${formatLine(total[2])}`;
+  }
+  if (market === "SPREAD") {
+    const homeSpread = selection.match(/^HOME_([+-]?\d+(?:\.\d+)?)$/);
+    const awaySpread = selection.match(/^AWAY_([+-]?\d+(?:\.\d+)?)$/);
+    if (homeSpread) return `${match.homeTeam.name} ${formatBookLine(homeSpread[1])}`;
+    if (awaySpread) return `${match.awayTeam.name} ${formatBookLine(awaySpread[1])}`;
+  }
   return selection;
+}
+
+function titleCase(value: string) {
+  return value.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function formatBookLine(value: string) {
+  return formatLine(value).replace(/^\+/, "");
+}
+
+function formatLine(value: string) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return value;
+  return Number.isInteger(numeric) ? String(numeric) : String(numeric);
 }
 
 function latestSnapshot(
   snapshots: MatchDetail["oddsSnapshots"],
   market: string,
-  selection: string
+  selection: string,
+  match: MatchDetail
 ) {
+  const normalizedSelection = snapshotSelection(selection, market, match);
   return snapshots
-    .filter((s) => s.market === market && s.selection === selection)
+    .filter((s) => s.market === market && s.selection === normalizedSelection)
     .sort((a, b) => new Date(b.capturedAt).getTime() - new Date(a.capturedAt).getTime())[0];
 }
 
 function bestSnapshot(
   snapshots: MatchDetail["oddsSnapshots"],
   market: string,
-  selection: string
+  selection: string,
+  match: MatchDetail
 ) {
+  const normalizedSelection = snapshotSelection(selection, market, match);
   return snapshots
-    .filter((s) => s.market === market && s.selection === selection)
+    .filter((s) => s.market === market && s.selection === normalizedSelection)
     .sort((a, b) => Number(b.priceDecimal) - Number(a.priceDecimal))[0];
 }
 
@@ -212,7 +248,7 @@ function deriveRiskFlags(match: MatchDetail): RiskFlag[] {
 
   // Check current model-market disagreement against the latest line.
   for (const pred of match.modelPredictions) {
-    const snap = latestSnapshot(match.oddsSnapshots, pred.market, pred.selection);
+    const snap = latestSnapshot(match.oddsSnapshots, pred.market, pred.selection, match);
     if (!snap) continue;
     const delta = Math.abs(Number(pred.fairProbability) - Number(snap.impliedProb));
     const label = selectionLabel(pred.selection, match);
@@ -245,7 +281,7 @@ function deriveRiskFlags(match: MatchDetail): RiskFlag[] {
     flags.push({
       type: "NO_MODEL_PREDICTIONS",
       severity: "high",
-      message: "No model predictions available. Run the Poisson worker to generate estimates."
+      message: "No model predictions available. Run the basketball prediction worker to generate estimates."
     });
   }
 
@@ -278,7 +314,7 @@ function buildAnalystNotes(match: MatchDetail): string[] {
 
   // Edge detection
   for (const pred of match.modelPredictions) {
-    const snap = bestSnapshot(match.oddsSnapshots, pred.market, pred.selection);
+    const snap = bestSnapshot(match.oddsSnapshots, pred.market, pred.selection, match);
     if (!snap) continue;
     const ev = Number(pred.fairProbability) * Number(snap.priceDecimal) - 1;
     if (ev > 0.05) {
@@ -292,7 +328,7 @@ function buildAnalystNotes(match: MatchDetail): string[] {
 
   // Odds movement
   const homeSnaps = match.oddsSnapshots
-    .filter((s) => s.market === "MONEYLINE" && s.selection === "HOME")
+    .filter((s) => s.market === "MONEYLINE" && s.selection === match.homeTeam.name)
     .sort((a, b) => new Date(a.capturedAt).getTime() - new Date(b.capturedAt).getTime());
 
   if (homeSnaps.length >= 2) {
@@ -308,19 +344,19 @@ function buildAnalystNotes(match: MatchDetail): string[] {
     }
   }
 
-  // xG note from rationale
+  // Expected-points note from rationale
   const rationale = match.modelPredictions.find((p) => p.rationale)?.rationale;
   if (rationale) {
-    const xgMatch = rationale.match(/home_xg=([\d.]+).*away_xg=([\d.]+)/);
-    if (xgMatch) {
-      const homeXg = parseFloat(xgMatch[1]);
-      const awayXg = parseFloat(xgMatch[2]);
+    const pointsMatch = rationale.match(/home_pts=([\d.]+).*away_pts=([\d.]+)/);
+    if (pointsMatch) {
+      const homePoints = parseFloat(pointsMatch[1]);
+      const awayPoints = parseFloat(pointsMatch[2]);
       notes.push(
-        `Poisson model inputs: ${match.homeTeam.name} xG = ${homeXg.toFixed(3)}, ` +
-        `${match.awayTeam.name} xG = ${awayXg.toFixed(3)}. ` +
-        `${homeXg > awayXg
-          ? `Home side projects ${((homeXg / awayXg - 1) * 100).toFixed(0)}% more expected output.`
-          : `Away side projects ${((awayXg / homeXg - 1) * 100).toFixed(0)}% more expected output.`
+        `Basketball model inputs: ${match.homeTeam.name} projected ${homePoints.toFixed(1)} points, ` +
+        `${match.awayTeam.name} projected ${awayPoints.toFixed(1)} points. ` +
+        `${homePoints > awayPoints
+          ? `Home side projects ${(homePoints - awayPoints).toFixed(1)} more points.`
+          : `Away side projects ${(awayPoints - homePoints).toFixed(1)} more points.`
         }`
       );
     }
@@ -690,8 +726,8 @@ export default function MatchDetailPage() {
               <div className="flex items-start gap-2.5 text-slate-400">
                 <TrendingUp className="h-3.5 w-3.5 mt-0.5 shrink-0 text-slate-500" />
                 <span>
-                  Model uses a deterministic Poisson distribution calibrated on historical
-                  goal rates. It does not incorporate in-game momentum, weather, or travel fatigue.
+                  Model uses a deterministic basketball rating projection calibrated on historical
+                  scoring rates. It does not incorporate in-game momentum, late injury news, or travel fatigue.
                 </span>
               </div>
               <VarianceNotice

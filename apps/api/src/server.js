@@ -205,7 +205,11 @@ app.get("/predictions", async (req, res) => {
         include: {
           league: true,
           homeTeam: true,
-          awayTeam: true
+          awayTeam: true,
+          oddsSnapshots: {
+            orderBy: { capturedAt: "desc" },
+            include: { bookmaker: true }
+          }
         }
       }
     }
