@@ -4,5 +4,6 @@ describe("Vercel API adapter", () => {
 
     expect(typeof handler).toBe("function");
     expect(typeof handler.use).toBe("function");
+    expect(handler.default).toBe(handler);
   });
 });
