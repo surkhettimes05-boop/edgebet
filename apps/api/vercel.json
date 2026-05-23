@@ -8,5 +8,11 @@
       "framework": "express",
       "routePrefix": "/"
     }
-  }
+  },
+  "crons": [
+    {
+      "path": "/jobs/fetch-odds",
+      "schedule": "0 0 * * *"
+    }
+  ]
 }

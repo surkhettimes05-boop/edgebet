@@ -4,7 +4,7 @@ const express = require("express");
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
 const { PrismaClient } = require("@prisma/client");
-const { scheduleFetchOddsJob } = require("./jobs/fetchOdds");
+const { scheduleFetchOddsJob, runFetchOddsJob } = require("./jobs/fetchOdds");
 const { auditPrediction } = require("./services/llmAuditor");
 const authRoutes = require("./routes/authRoutes");
 const betRoutes = require("./routes/betRoutes");
@@ -36,16 +36,26 @@ app.use((req, res, next) => {
 });
 
 // ─── CORS ─────────────────────────────────────────────────────────────────────
-const allowedOrigins = (process.env.CORS_ORIGINS || "http://localhost:3000").split(",");
+const allowedOrigins = (process.env.CORS_ORIGINS || "http://localhost:3000")
+  .split(",")
+  .map((o) => o.trim())
+  .filter(Boolean);
 
 app.use(cors({
   origin: (origin, callback) => {
-    // Allow requests with no origin (e.g. curl, server-to-server)
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error(`CORS: origin ${origin} not allowed`));
+    // Allow requests with no origin (e.g. curl, server-to-server, health checks)
+    if (!origin) {
+      return callback(null, true);
     }
+    // Exact match
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    // In development, allow all localhost origins regardless of port
+    if (process.env.NODE_ENV !== "production" && /^https?:\/\/localhost(:\d+)?$/.test(origin)) {
+      return callback(null, true);
+    }
+    callback(new Error(`CORS: origin ${origin} not allowed`));
   },
   credentials: true
 }));
@@ -82,6 +92,46 @@ app.get("/health", async (req, res) => {
     timestamp: new Date().toISOString(),
     uptime: Math.floor(process.uptime())
   });
+});
+
+function isAuthorizedJobRequest(req) {
+  const secrets = [process.env.CRON_SECRET, process.env.JOB_SECRET].filter(Boolean);
+
+  if (secrets.length === 0) {
+    return process.env.NODE_ENV !== "production";
+  }
+
+  const authorization = req.get("authorization") || "";
+  const bearerToken = authorization.startsWith("Bearer ")
+    ? authorization.slice("Bearer ".length)
+    : "";
+  const headerToken = req.get("x-job-secret");
+
+  return secrets.includes(bearerToken) || secrets.includes(headerToken);
+}
+
+app.get("/jobs/fetch-odds", async (req, res) => {
+  if (!isAuthorizedJobRequest(req)) {
+    return res.status(401).json({
+      status: "UNAUTHORIZED",
+      error: "Valid cron secret required."
+    });
+  }
+
+  try {
+    const result = await runFetchOddsJob({ prisma });
+    const status = result.skipped ? "SKIPPED" : "OK";
+
+    return res.json({
+      status,
+      data: result
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: "INTERNAL_ERROR",
+      error: error.message
+    });
+  }
 });
 
 app.get("/matches", async (req, res) => {
