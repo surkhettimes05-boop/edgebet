@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "installCommand": "npm install",
+  "buildCommand": "DATABASE_URL=postgresql://user:pass@localhost:5432/edgebet npx prisma generate --schema prisma/schema.prisma",
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "/api/index.js"
+    }
+  ]
+}
