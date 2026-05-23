@@ -1,0 +1,238 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                String             @id @default(cuid())
+  email             String             @unique
+  name              String?
+  hashedPassword    String             @map("hashed_password")
+  createdAt         DateTime           @default(now()) @map("created_at")
+  updatedAt         DateTime           @updatedAt @map("updated_at")
+  trackedBets       TrackedBet[]
+  behavioralSignals BehavioralSignal[]
+
+  @@map("users")
+}
+
+model Team {
+  id          String   @id @default(cuid())
+  name        String
+  abbreviation String?
+  externalId  String?  @unique @map("external_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  homeMatches Match[]  @relation("HomeTeam")
+  awayMatches Match[]  @relation("AwayTeam")
+
+  @@map("teams")
+}
+
+model League {
+  id         String   @id @default(cuid())
+  name       String
+  sport      String
+  region     String?
+  externalId String?  @unique @map("external_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+  matches    Match[]
+
+  @@map("leagues")
+}
+
+model Match {
+  id                 String              @id @default(cuid())
+  leagueId           String              @map("league_id")
+  homeTeamId         String              @map("home_team_id")
+  awayTeamId         String              @map("away_team_id")
+  startsAt           DateTime            @map("starts_at")
+  status             MatchStatus         @default(SCHEDULED)
+  homeScore          Int?                @map("home_score")
+  awayScore          Int?                @map("away_score")
+  externalId         String?             @unique @map("external_id")
+  createdAt          DateTime            @default(now()) @map("created_at")
+  updatedAt          DateTime            @updatedAt @map("updated_at")
+  league             League              @relation(fields: [leagueId], references: [id])
+  homeTeam           Team                @relation("HomeTeam", fields: [homeTeamId], references: [id])
+  awayTeam           Team                @relation("AwayTeam", fields: [awayTeamId], references: [id])
+  oddsSnapshots      OddsSnapshot[]
+  modelPredictions   ModelPrediction[]
+  trackedBets        TrackedBet[]
+  predictionOutcomes PredictionOutcome[]
+
+  @@index([leagueId, startsAt])
+  @@index([homeTeamId])
+  @@index([awayTeamId])
+  @@map("matches")
+}
+
+model Bookmaker {
+  id             String          @id @default(cuid())
+  name           String
+  externalId     String?         @unique @map("external_id")
+  region         String?
+  createdAt      DateTime        @default(now()) @map("created_at")
+  updatedAt      DateTime        @updatedAt @map("updated_at")
+  oddsSnapshots  OddsSnapshot[]
+  trackedBets    TrackedBet[]
+
+  @@map("bookmakers")
+}
+
+model OddsSnapshot {
+  id            String     @id @default(cuid())
+  matchId       String     @map("match_id")
+  bookmakerId   String     @map("bookmaker_id")
+  market        MarketType
+  selection     String
+  priceAmerican Int        @map("price_american")
+  priceDecimal  Decimal    @db.Decimal(10, 4) @map("price_decimal")
+  impliedProb   Decimal    @db.Decimal(8, 6) @map("implied_prob")
+  bookmakerMargin Decimal  @db.Decimal(8, 6) @map("bookmaker_margin")
+  capturedAt    DateTime   @default(now()) @map("captured_at")
+  match         Match      @relation(fields: [matchId], references: [id])
+  bookmaker     Bookmaker  @relation(fields: [bookmakerId], references: [id])
+  trackedBets   TrackedBet[]
+  clvHistory    ClvHistory[]
+
+  @@index([matchId, market, capturedAt])
+  @@index([bookmakerId])
+  @@unique([matchId, bookmakerId, market, selection, priceAmerican, capturedAt])
+  @@map("odds_snapshots")
+}
+
+model ModelPrediction {
+  id              String              @id @default(cuid())
+  matchId          String              @map("match_id")
+  modelName        String              @map("model_name")
+  modelVersion     String              @map("model_version")
+  market           MarketType
+  selection        String
+  fairProbability  Decimal             @db.Decimal(8, 6) @map("fair_probability")
+  fairPriceDecimal Decimal             @db.Decimal(10, 4) @map("fair_price_decimal")
+  edgePct          Decimal             @db.Decimal(8, 4) @map("edge_pct")
+  rationale        String?
+  createdAt        DateTime            @default(now()) @map("created_at")
+  match            Match               @relation(fields: [matchId], references: [id])
+  trackedBets      TrackedBet[]
+  outcomes         PredictionOutcome[]
+
+  @@index([matchId, market, createdAt])
+  @@map("model_predictions")
+}
+
+model TrackedBet {
+  id                 String             @id @default(cuid())
+  userId             String?            @map("user_id")
+  matchId            String             @map("match_id")
+  bookmakerId        String?            @map("bookmaker_id")
+  oddsSnapshotId     String?            @map("odds_snapshot_id")
+  modelPredictionId  String?            @map("model_prediction_id")
+  market             MarketType
+  selection          String
+  stakeUnits         Decimal            @db.Decimal(10, 4) @map("stake_units")
+  priceAmerican      Int?               @map("price_american")
+  priceDecimal       Decimal            @db.Decimal(10, 4) @map("price_decimal")
+  evAtEntry          Decimal?           @db.Decimal(8, 6) @map("ev_at_entry")
+  status             BetStatus          @default(TRACKED)
+  placedAt           DateTime?          @map("placed_at")
+  createdAt          DateTime           @default(now()) @map("created_at")
+  updatedAt          DateTime           @updatedAt @map("updated_at")
+  user               User?              @relation(fields: [userId], references: [id])
+  match              Match              @relation(fields: [matchId], references: [id])
+  bookmaker          Bookmaker?         @relation(fields: [bookmakerId], references: [id])
+  oddsSnapshot       OddsSnapshot?      @relation(fields: [oddsSnapshotId], references: [id])
+  modelPrediction    ModelPrediction?   @relation(fields: [modelPredictionId], references: [id])
+  behavioralSignals  BehavioralSignal[]
+  clvHistory         ClvHistory[]
+
+  @@index([userId, createdAt])
+  @@index([matchId])
+  @@map("tracked_bets")
+}
+
+model BehavioralSignal {
+  id           String    @id @default(cuid())
+  userId       String?   @map("user_id")
+  trackedBetId String?   @map("tracked_bet_id")
+  signalType   String    @map("signal_type")
+  severity     Int       @default(1)
+  metadata     Json?
+  createdAt    DateTime  @default(now()) @map("created_at")
+  user         User?     @relation(fields: [userId], references: [id])
+  trackedBet   TrackedBet? @relation(fields: [trackedBetId], references: [id])
+
+  @@index([userId, createdAt])
+  @@map("behavioral_signals")
+}
+
+model ClvHistory {
+  id              String        @id @default(cuid())
+  trackedBetId    String        @map("tracked_bet_id")
+  oddsSnapshotId  String?       @map("odds_snapshot_id")
+  closingPrice    Decimal?      @db.Decimal(10, 4) @map("closing_price")
+  entryPrice      Decimal       @db.Decimal(10, 4) @map("entry_price")
+  clvPct          Decimal?      @db.Decimal(8, 4) @map("clv_pct")
+  measuredAt      DateTime      @default(now()) @map("measured_at")
+  trackedBet      TrackedBet    @relation(fields: [trackedBetId], references: [id])
+  oddsSnapshot    OddsSnapshot? @relation(fields: [oddsSnapshotId], references: [id])
+
+  @@index([trackedBetId, measuredAt])
+  @@map("clv_history")
+}
+
+model PredictionOutcome {
+  id                  String          @id @default(cuid())
+  matchId             String          @map("match_id")
+  modelPredictionId   String          @map("model_prediction_id")
+  result              OutcomeResult
+  predictedProbability Decimal?       @db.Decimal(8, 6) @map("predicted_probability")
+  closingEdgePct      Decimal?        @db.Decimal(8, 4) @map("closing_edge_pct")
+  realizedReturn      Decimal?        @db.Decimal(10, 4) @map("realized_return")
+  evaluatedAt         DateTime        @default(now()) @map("evaluated_at")
+  match               Match           @relation(fields: [matchId], references: [id])
+  modelPrediction     ModelPrediction @relation(fields: [modelPredictionId], references: [id])
+
+  @@index([modelPredictionId])
+  @@index([matchId])
+  @@index([evaluatedAt])
+  @@map("prediction_outcomes")
+}
+
+enum MatchStatus {
+  SCHEDULED
+  LIVE
+  FINAL
+  POSTPONED
+  CANCELLED
+}
+
+enum MarketType {
+  MONEYLINE
+  SPREAD
+  TOTAL
+  PLAYER_PROP
+  BTTS
+}
+
+enum BetStatus {
+  TRACKED
+  PLACED
+  WON
+  LOST
+  PUSH
+  VOID
+}
+
+enum OutcomeResult {
+  WIN
+  LOSS
+  PUSH
+  UNRESOLVED
+}

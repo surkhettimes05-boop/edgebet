@@ -1,0 +1,12 @@
+# nixpacks.toml — pins Node.js version for Railway Nixpacks builds
+[phases.setup]
+nixPkgs = ["nodejs_20"]
+
+[phases.install]
+cmds = [
+  "npm install",
+  "npx prisma generate --schema prisma/schema.prisma"
+]
+
+[start]
+cmd = "npm run start:prod"

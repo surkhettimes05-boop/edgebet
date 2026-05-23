@@ -1,250 +1,335 @@
-# EdgeBet - Deployment Guide
+# EdgeBet — Production Deployment Guide
 
-## GitHub Repository
+## Architecture
 
-Your code is now hosted at: **https://github.com/surkhettimes05-boop/edgebet**
-
-All commits are tracked and the repository is ready for collaboration.
-
-## Vercel Deployment
-
-### Prerequisites
-
-1. **Vercel Account**: Sign up at https://vercel.com (free tier available)
-2. **GitHub Connected**: Your GitHub account should be connected to Vercel
-3. **Environment Variables**: Database and OAuth credentials
-
-### Step 1: Connect to Vercel
-
-1. Go to https://vercel.com/dashboard
-2. Click "Add New..." → "Project"
-3. Select "Import Git Repository"
-4. Search for and select `surkhettimes05-boop/edgebet`
-5. Click "Import"
-
-### Step 2: Configure Environment Variables
-
-In the Vercel project settings, add the following environment variables:
-
-**Required Variables:**
 ```
-DATABASE_URL=postgresql://user:password@host:port/database
-JWT_SECRET=your-secret-key-here
-VITE_APP_ID=your-oauth-app-id
-OAUTH_SERVER_URL=https://api.manus.im
-VITE_OAUTH_PORTAL_URL=https://oauth.manus.im
-OWNER_OPEN_ID=your-owner-id
-OWNER_NAME=Your Name
+Vercel (Next.js frontend)
+    ↕ HTTPS
+Railway (Express API)
+    ↕ PostgreSQL wire protocol (SSL)
+Supabase (PostgreSQL database)
+    ↑
+Railway Cron (Python prediction worker, every 6h)
 ```
 
-**Optional Variables (for LLM features):**
-```
-BUILT_IN_FORGE_API_URL=https://api.manus.im
-BUILT_IN_FORGE_API_KEY=your-api-key
-VITE_FRONTEND_FORGE_API_KEY=your-frontend-key
-VITE_FRONTEND_FORGE_API_URL=https://api.manus.im
-```
+---
 
-### Step 3: Deploy
+## Prerequisites
 
-1. After adding environment variables, click "Deploy"
-2. Vercel will automatically build and deploy your app
-3. Your live URL will be: `https://edgebet-[random].vercel.app`
+- Node.js 20+, npm 10+
+- Python 3.11+
+- Railway CLI: `npm install -g @railway/cli`
+- Vercel CLI: `npm install -g vercel`
+- A Supabase project (free tier works for MVP)
+- An account at [the-odds-api.com](https://the-odds-api.com) (free tier: 500 req/month)
+- An OpenAI API key (for the LLM auditor)
 
-### Step 4: Custom Domain (Optional)
+---
 
-1. In Vercel project settings, go to "Domains"
-2. Add your custom domain (e.g., `edgebet.com`)
-3. Follow DNS configuration instructions
+## Step 1 — Supabase Database
 
-## Database Setup for Production
+1. Create a new Supabase project at [supabase.com](https://supabase.com).
+2. Go to **Project Settings → Database → Connection string (URI)**.
+3. Copy the URI. It looks like:
+   ```
+   postgresql://postgres:[PASSWORD]@db.[REF].supabase.co:5432/postgres
+   ```
+4. Append `?sslmode=require` to the URI.
+5. Save this as `DATABASE_URL` — you will use it in both the API and the prediction worker.
 
-### Option 1: PostgreSQL on Railway (Recommended)
+> Supabase free tier includes 500 MB storage and 2 GB bandwidth/month.
+> The EdgeBet MVP schema fits comfortably within these limits.
 
-1. Go to https://railway.app
-2. Create new project → Add PostgreSQL
-3. Copy the connection string
-4. Add to Vercel environment variables as `DATABASE_URL`
+---
 
-### Option 2: PostgreSQL on AWS RDS
+## Step 2 — API on Railway
 
-1. Create RDS instance with PostgreSQL
-2. Configure security groups to allow Vercel IPs
-3. Copy connection string to `DATABASE_URL`
-
-### Option 3: PostgreSQL on Supabase
-
-1. Go to https://supabase.com
-2. Create new project
-3. Copy PostgreSQL connection string
-4. Add to Vercel environment variables
-
-## Running Migrations
-
-After deployment, run database migrations:
+### 2a. Create the service
 
 ```bash
-# In your local environment
-DATABASE_URL="your-production-db-url" pnpm db:push
+railway login
+railway init          # creates a new project
+railway link          # link to existing project if needed
 ```
 
-Or use Vercel's CLI:
+### 2b. Set environment variables
+
+In Railway → Service → Variables, add every key from `apps/api/.env.production`.
+Replace all placeholder values with real secrets.
+
+Generate a secure JWT secret:
+```bash
+node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
+```
+
+### 2c. Configure the service root
+
+Railway needs to know the service lives in a subdirectory of the monorepo.
+In Railway → Service → Settings → Root Directory, set:
+```
+apps/api
+```
+
+### 2d. Deploy
 
 ```bash
-vercel env pull
-pnpm db:push
+cd apps/api
+railway up
 ```
 
-## Monitoring & Logs
+Railway will:
+1. Detect Node.js via Nixpacks
+2. Run `npm install`
+3. Run `npm run start:prod` which executes `prisma migrate deploy` then starts the server
 
-### View Deployment Logs
-
-1. Go to Vercel dashboard
-2. Select your project
-3. Click "Deployments" tab
-4. Click on any deployment to see logs
-
-### Real-time Logs
+### 2e. Verify
 
 ```bash
-vercel logs --follow
+node apps/api/scripts/health-check.js https://YOUR-RAILWAY-URL.up.railway.app
 ```
 
-## Troubleshooting
+Expected output:
+```
+  ✓  API reachable
+  ✓  Database connected
+  ✓  Matches endpoint responds
+  ✓  Calibration endpoint responds
 
-### Build Fails
-
-**Error: "Cannot find module"**
-- Solution: Ensure all dependencies are in `package.json`
-- Run: `pnpm install` locally and commit `pnpm-lock.yaml`
-
-**Error: "DATABASE_URL not set"**
-- Solution: Add `DATABASE_URL` to Vercel environment variables
-- Verify it's set for both Preview and Production environments
-
-### Database Connection Issues
-
-**Error: "ECONNREFUSED"**
-- Solution: Check database URL is correct
-- Verify database security groups allow Vercel IPs
-- Test connection locally first
-
-### OAuth Issues
-
-**Error: "Invalid redirect URI"**
-- Solution: Add Vercel URL to OAuth app's allowed redirects
-- Format: `https://your-vercel-domain.vercel.app/api/oauth/callback`
-
-## Performance Optimization
-
-### Enable Caching
-
-Add to `vercel.json`:
-```json
-{
-  "headers": [
-    {
-      "source": "/api/trpc/:path*",
-      "headers": [
-        {
-          "key": "Cache-Control",
-          "value": "public, max-age=60, s-maxage=120"
-        }
-      ]
-    }
-  ]
-}
+  4 passed, 0 failed
 ```
 
-### Database Connection Pooling
+---
 
-For production, use connection pooling:
+## Step 3 — Prediction Worker on Railway (Cron)
+
+### 3a. Create a second Railway service in the same project
+
+In Railway dashboard → **New Service → Empty Service**.
+Name it `prediction-worker`.
+
+### 3b. Set root directory
+
+Railway → prediction-worker → Settings → Root Directory:
 ```
-DATABASE_URL="postgresql://user:pass@pool.host:6543/db?schema=public"
+services/prediction-worker
 ```
 
-## CI/CD Pipeline
+### 3c. Set environment variables
 
-Vercel automatically:
-- Builds on every push to `main`
-- Runs tests (if configured)
-- Deploys to preview on pull requests
-- Deploys to production on merge to `main`
+Add `DATABASE_URL` (same Supabase URI as the API).
+Add `PREDICTION_LIMIT=50` and `HISTORY_LIMIT=500`.
 
-### Add GitHub Status Checks
+### 3d. Configure as a cron job
 
-1. In Vercel settings, enable "Deployment Status"
-2. This prevents merging PRs if deployment fails
+Railway → prediction-worker → Settings → Cron Schedule:
+```
+0 */6 * * *
+```
+This runs the worker every 6 hours. Adjust to `0 */3 * * *` for higher frequency
+once you have an active odds API key.
 
-## Rollback
+### 3e. Deploy
 
-To rollback to a previous deployment:
+```bash
+cd services/prediction-worker
+railway up
+```
 
-1. Go to Vercel dashboard
-2. Click "Deployments"
-3. Find the previous working deployment
-4. Click the three dots → "Promote to Production"
+Railway will install Python dependencies from `requirements.txt` and run `python main.py`
+on the cron schedule. The worker exits after each run — this is expected.
 
-## Environment-Specific Configuration
+---
 
-### Preview Environment (Pull Requests)
-- Uses separate database (optional)
-- Can have different API endpoints
-- Good for testing before production
+## Step 4 — Frontend on Vercel
 
-### Production Environment
-- Uses production database
-- Must have all required variables set
-- Should use custom domain
+### 4a. Import the repository
 
-## Monitoring & Analytics
+1. Go to [vercel.com/new](https://vercel.com/new).
+2. Import your GitHub repository.
+3. Set **Root Directory** to `apps/web`.
+4. Framework preset: **Next.js** (auto-detected).
 
-### Enable Vercel Analytics
+### 4b. Set environment variables
 
-1. In Vercel project settings, enable "Web Analytics"
-2. View real-time metrics in dashboard
+In Vercel → Project → Settings → Environment Variables, add:
 
-### Application Monitoring
+| Key | Value |
+|-----|-------|
+| `NEXT_PUBLIC_API_URL` | `https://YOUR-RAILWAY-URL.up.railway.app` |
 
-For production monitoring, consider:
-- **Sentry**: Error tracking
-- **LogRocket**: Session replay
-- **New Relic**: Performance monitoring
+Set scope to **Production** (and optionally Preview).
 
-## Scaling
+### 4c. Deploy
 
-### Auto-scaling
+Vercel deploys automatically on every push to `main`.
+For a manual deploy:
+```bash
+cd apps/web
+vercel --prod
+```
 
-Vercel handles auto-scaling automatically:
-- Scales up during traffic spikes
-- Scales down during low traffic
-- No configuration needed
+### 4d. Update CORS on the API
 
-### Database Scaling
+Once you have your Vercel URL (e.g. `https://edgebet.vercel.app`), update the
+`CORS_ORIGINS` variable in Railway:
+```
+CORS_ORIGINS=https://edgebet.vercel.app
+```
 
-As traffic grows:
-1. Monitor database CPU/memory in Railway/AWS/Supabase
-2. Upgrade instance type if needed
-3. Consider read replicas for heavy read workloads
+Railway will redeploy automatically.
 
-## Security Best Practices
+---
 
-1. **Never commit secrets** - Use environment variables only
-2. **Enable branch protection** - Require reviews before merge
-3. **Rotate secrets regularly** - Change API keys periodically
-4. **Use HTTPS only** - Vercel provides free SSL/TLS
-5. **Monitor logs** - Check for suspicious activity
+## Step 5 — Post-Deploy Validation
 
-## Support & Documentation
+Run through this checklist after every production deploy:
 
-- **Vercel Docs**: https://vercel.com/docs
-- **EdgeBet Setup**: See `EDGEBET_SETUP.md`
-- **GitHub Issues**: Report bugs at https://github.com/surkhettimes05-boop/edgebet/issues
+### Automated
+```bash
+node apps/api/scripts/health-check.js https://YOUR-RAILWAY-URL.up.railway.app
+```
 
-## Next Steps
+### Manual
+- [ ] `GET /health` returns `{ "status": "ok", "database": "connected" }`
+- [ ] Frontend loads at your Vercel URL
+- [ ] `/login` page renders, registration works end-to-end
+- [ ] `/dashboard` loads after login
+- [ ] `/matches` page loads (empty state is fine without odds data)
+- [ ] `/value-bets` page loads (demo data shown without predictions)
+- [ ] `/bet-tracker` page loads, LOG BET modal opens
+- [ ] Prediction worker ran at least once (check Railway logs)
+- [ ] No CORS errors in browser console
 
-1. ✅ Code pushed to GitHub
-2. ⏳ Deploy to Vercel (follow steps above)
-3. ⏳ Set up production database
-4. ⏳ Configure custom domain
-5. ⏳ Monitor and optimize performance
+---
+
+## Environment Variables Reference
+
+### API (`apps/api/.env.production`)
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `DATABASE_URL` | ✅ | Supabase PostgreSQL URI with `?sslmode=require` |
+| `NODE_ENV` | ✅ | Must be `production` |
+| `PORT` | ✅ | Railway sets this automatically; default `4000` |
+| `JWT_SECRET` | ✅ | 48+ byte random hex string. Rotate if compromised. |
+| `JWT_EXPIRES_IN` | — | Token lifetime. Default `7d`. |
+| `CORS_ORIGINS` | ✅ | Comma-separated list of allowed frontend origins |
+| `ODDS_API_KEY` | — | From the-odds-api.com. Worker skips ingestion if absent. |
+| `ODDS_SPORTS` | — | Comma-separated sport keys. Default: `basketball_nba` |
+| `ODDS_CRON_ENABLED` | — | Set `true` to enable in-process odds cron |
+| `LLM_API_KEY` | — | OpenAI API key. Audit endpoint returns error if absent. |
+| `LLM_MODEL` | — | Default `gpt-4o-mini` |
+
+### Web (`apps/web/.env.production`)
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `NEXT_PUBLIC_API_URL` | ✅ | Full URL of the Railway API service |
+
+### Prediction Worker
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `DATABASE_URL` | ✅ | Same Supabase URI as the API |
+| `PREDICTION_LIMIT` | — | Max upcoming matches per run. Default `50`. |
+| `HISTORY_LIMIT` | — | Max historical results for xG. Default `500`. |
+
+---
+
+## Rollback Instructions
+
+### API rollback (Railway)
+
+Railway keeps a full deploy history.
+
+**Option A — Dashboard:**
+1. Railway → Service → Deployments
+2. Find the last known-good deploy
+3. Click **Redeploy**
+
+**Option B — CLI:**
+```bash
+# List recent deploys
+railway deployments
+
+# Redeploy a specific deployment ID
+railway redeploy <DEPLOYMENT_ID>
+```
+
+**If a bad migration was applied:**
+Prisma does not auto-rollback migrations. To revert a schema change:
+
+1. Write a new migration that undoes the change:
+   ```bash
+   # Locally, against a dev database
+   npx prisma migrate dev --name revert_bad_change --schema apps/api/prisma/schema.prisma
+   ```
+2. Commit and push — Railway will apply it on next deploy.
+3. Never delete migration files from `prisma/migrations/` — this breaks the migration history.
+
+### Frontend rollback (Vercel)
+
+1. Vercel → Project → Deployments
+2. Find the last known-good deployment
+3. Click the **⋯** menu → **Promote to Production**
+
+This is instant — no rebuild required.
+
+### Database rollback
+
+Supabase does not support point-in-time restore on the free tier.
+On the Pro tier: Supabase → Project → Database → Backups → Restore.
+
+For the MVP, take a manual backup before any significant migration:
+```bash
+pg_dump "postgresql://postgres:[PASSWORD]@db.[REF].supabase.co:5432/postgres?sslmode=require" \
+  --no-owner --no-acl -Fc -f edgebet_backup_$(date +%Y%m%d).dump
+```
+
+---
+
+## Production Health Checks
+
+### Automated (run after every deploy)
+```bash
+node apps/api/scripts/health-check.js $API_URL
+```
+
+### Manual endpoint checks
+
+```bash
+# API health
+curl https://YOUR-API.up.railway.app/health
+
+# Database connectivity
+curl https://YOUR-API.up.railway.app/health | jq .database
+
+# Matches (should return empty array if no odds ingested yet)
+curl https://YOUR-API.up.railway.app/matches | jq .meta
+
+# Calibration (should return empty stats)
+curl https://YOUR-API.up.railway.app/calibration | jq .data.stats.resolvedCount
+```
+
+### Monitoring recommendations
+
+- Set up Railway's built-in **Uptime Monitoring** on the `/health` endpoint.
+- Configure a Railway alert for deploy failures.
+- Check prediction worker logs after each cron run:
+  ```bash
+  railway logs --service prediction-worker
+  ```
+
+---
+
+## Security Notes
+
+- `JWT_SECRET` must be at least 48 bytes of random data. Rotate it by updating the
+  Railway variable — all existing sessions will be invalidated immediately.
+- `DATABASE_URL` contains the database password. Treat it as a top-secret credential.
+- The `.env.production` files in this repo contain only placeholders. Real values
+  live exclusively in Railway and Vercel environment variable stores.
+- HTTP-only cookies are used for session persistence alongside Bearer tokens.
+  The `Secure` flag is set automatically when `NODE_ENV=production`.
+- All API responses include `X-Content-Type-Options`, `X-Frame-Options`, and
+  `Strict-Transport-Security` headers in production.

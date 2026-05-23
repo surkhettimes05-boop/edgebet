@@ -1,0 +1,36 @@
+# render.yaml — Render.com deployment config for the EdgeBet API
+# Docs: https://render.com/docs/blueprint-spec
+#
+# Usage: connect your GitHub repo in the Render dashboard and point
+# the root directory to apps/api. Render will detect this file.
+
+services:
+  - type: web
+    name: edgebet-api
+    runtime: node
+    rootDir: apps/api
+    buildCommand: npm install && npx prisma generate --schema prisma/schema.prisma
+    startCommand: npm run start:prod
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false          # set manually in Render dashboard
+      - key: JWT_SECRET
+        generateValue: true  # Render generates a secure random value
+      - key: JWT_EXPIRES_IN
+        value: 7d
+      - key: CORS_ORIGINS
+        sync: false          # set to your Vercel URL after first deploy
+      - key: ODDS_API_KEY
+        sync: false
+      - key: ODDS_CRON_ENABLED
+        value: "true"
+      - key: LLM_API_KEY
+        sync: false
+      - key: LLM_BASE_URL
+        value: https://api.openai.com/v1
+      - key: LLM_MODEL
+        value: gpt-4o-mini

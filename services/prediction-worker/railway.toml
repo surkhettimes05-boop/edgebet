@@ -1,0 +1,10 @@
+[build]
+builder = "NIXPACKS"
+
+[deploy]
+# Cron worker — runs on schedule, exits after completion
+# Railway cron syntax: set RAILWAY_CRON_SCHEDULE in environment variables
+# Recommended: "0 */6 * * *" (every 6 hours)
+startCommand = "python main.py"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 2
