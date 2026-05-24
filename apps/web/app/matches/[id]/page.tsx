@@ -281,7 +281,7 @@ function deriveRiskFlags(match: MatchDetail): RiskFlag[] {
     flags.push({
       type: "NO_MODEL_PREDICTIONS",
       severity: "high",
-      message: "No model predictions available. Run the basketball prediction worker to generate estimates."
+      message: "No model predictions available. Run the prediction job to generate probability estimates."
     });
   }
 
@@ -726,8 +726,9 @@ export default function MatchDetailPage() {
               <div className="flex items-start gap-2.5 text-slate-400">
                 <TrendingUp className="h-3.5 w-3.5 mt-0.5 shrink-0 text-slate-500" />
                 <span>
-                  Model uses a deterministic basketball rating projection calibrated on historical
-                  scoring rates. It does not incorporate in-game momentum, late injury news, or travel fatigue.
+                  Model outputs are deterministic probability estimates from market snapshots or
+                  schedule-prior baselines. They do not incorporate in-game momentum, late injury news,
+                  or travel fatigue.
                 </span>
               </div>
               <VarianceNotice

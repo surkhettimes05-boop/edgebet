@@ -5,6 +5,7 @@ const cors = require("cors");
 const cookieParser = require("cookie-parser");
 const { PrismaClient } = require("@prisma/client");
 const { scheduleFetchOddsJob, runFetchOddsJob } = require("./jobs/fetchOdds");
+const { runGeneratePredictionsJob } = require("./jobs/generatePredictions");
 const { auditPrediction } = require("./services/llmAuditor");
 const authRoutes = require("./routes/authRoutes");
 const betRoutes = require("./routes/betRoutes");
@@ -120,6 +121,30 @@ app.get("/jobs/fetch-odds", async (req, res) => {
 
   try {
     const result = await runFetchOddsJob({ prisma });
+    const status = result.skipped ? "SKIPPED" : "OK";
+
+    return res.json({
+      status,
+      data: result
+    });
+  } catch (error) {
+    return res.status(500).json({
+      status: "INTERNAL_ERROR",
+      error: error.message
+    });
+  }
+});
+
+app.get("/jobs/generate-predictions", async (req, res) => {
+  if (!isAuthorizedJobRequest(req)) {
+    return res.status(401).json({
+      status: "UNAUTHORIZED",
+      error: "Valid cron secret required."
+    });
+  }
+
+  try {
+    const result = await runGeneratePredictionsJob({ prisma });
     const status = result.skipped ? "SKIPPED" : "OK";
 
     return res.json({

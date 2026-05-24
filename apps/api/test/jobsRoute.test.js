@@ -58,4 +58,27 @@ describe("odds ingestion job route", () => {
       }
     });
   });
+
+  test("rejects prediction job calls without the cron secret", async () => {
+    const response = await request(app).get("/jobs/generate-predictions");
+
+    expect(response.status).toBe(401);
+  });
+
+  test("skips prediction generation when database is not configured", async () => {
+    vi.stubEnv("DATABASE_URL", "");
+
+    const response = await request(app)
+      .get("/jobs/generate-predictions")
+      .set("Authorization", "Bearer test-secret");
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      status: "SKIPPED",
+      data: {
+        skipped: true,
+        error: "DATABASE_URL is not configured."
+      }
+    });
+  });
 });

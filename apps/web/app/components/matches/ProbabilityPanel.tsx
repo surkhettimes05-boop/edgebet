@@ -320,7 +320,7 @@ export default function ProbabilityPanel({
       <div className="flex flex-col items-center justify-center py-12 text-center font-mono">
         <p className="text-slate-500 text-sm">No model predictions available.</p>
         <p className="text-slate-600 text-xs mt-1">
-          Run the basketball prediction worker to generate probability estimates.
+          Run the prediction job to generate probability estimates.
         </p>
       </div>
     );
