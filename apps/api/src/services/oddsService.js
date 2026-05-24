@@ -5,7 +5,12 @@ const {
   impliedProbabilityFromAmerican
 } = require("../utils/impliedProbability");
 
-const DEFAULT_SPORTS = ["basketball_nba"];
+const DEFAULT_SPORTS = [
+  "basketball_nba",
+  "soccer_epl",
+  "soccer_usa_mls",
+  "americanfootball_nfl"
+];
 const DEFAULT_REGIONS = "us";
 const DEFAULT_MARKETS = "h2h,spreads,totals";
 

@@ -215,7 +215,7 @@ node apps/api/scripts/health-check.js https://YOUR-RAILWAY-URL.up.railway.app
 | `JWT_EXPIRES_IN` | — | Token lifetime. Default `7d`. |
 | `CORS_ORIGINS` | ✅ | Comma-separated list of allowed frontend origins |
 | `ODDS_API_KEY` | — | From the-odds-api.com. Worker skips ingestion if absent. |
-| `ODDS_SPORTS` | — | Comma-separated sport keys. Default: `basketball_nba` |
+| `ODDS_SPORTS` | — | Comma-separated sport keys. Default: `basketball_nba,soccer_epl,soccer_usa_mls,americanfootball_nfl` |
 | `ODDS_CRON_ENABLED` | — | Set `true` to enable in-process odds cron |
 | `LLM_API_KEY` | — | OpenAI API key. Audit endpoint returns error if absent. |
 | `LLM_MODEL` | — | Default `gpt-4o-mini` |

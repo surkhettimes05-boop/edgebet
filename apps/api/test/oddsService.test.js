@@ -35,6 +35,38 @@ const apiMatch = {
 };
 
 describe("odds service", () => {
+  test("requests football leagues by default so football matches can appear on the web", async () => {
+    const originalSports = process.env.ODDS_SPORTS;
+    delete process.env.ODDS_SPORTS;
+
+    const prisma = createPrismaMock();
+    const httpClient = {
+      get: vi.fn().mockResolvedValue({ data: [] })
+    };
+
+    try {
+      await ingestOdds({
+        prisma,
+        httpClient,
+        apiKey: "test-key"
+      });
+
+      const requestedUrls = httpClient.get.mock.calls.map(([url]) => url);
+      expect(requestedUrls).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining("/sports/soccer_epl/odds"),
+          expect.stringContaining("/sports/americanfootball_nfl/odds")
+        ])
+      );
+    } finally {
+      if (originalSports === undefined) {
+        delete process.env.ODDS_SPORTS;
+      } else {
+        process.env.ODDS_SPORTS = originalSports;
+      }
+    }
+  });
+
   test("normalizes API odds and stores snapshots without overwriting history", async () => {
     const prisma = createPrismaMock();
     prisma.league.upsert.mockResolvedValue({ id: "league-1" });
@@ -53,6 +85,7 @@ describe("odds service", () => {
       prisma,
       httpClient,
       apiKey: "test-key",
+      sports: ["basketball_nba"],
       now: new Date("2026-05-22T13:00:00Z")
     });
 
@@ -89,7 +122,8 @@ describe("odds service", () => {
     const result = await ingestOdds({
       prisma,
       httpClient,
-      apiKey: "test-key"
+      apiKey: "test-key",
+      sports: ["basketball_nba"]
     });
 
     expect(result).toEqual({
